@@ -27,7 +27,7 @@
  * POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <stdio.h>
+#include <assert.h>
 #include <string.h>
 
 #include <nanomsg/nn.h>
@@ -47,7 +47,7 @@
 struct nanomsg_ctx {
     ERL_NIF_TERM atom_ok;
     ERL_NIF_TERM atom_error;
-    ERL_NIF_TERM atom_none;
+    ERL_NIF_TERM atom_badarg;
 
     ERL_NIF_TERM atom_SOL_SOCKET;
     ERL_NIF_TERM atom_TCP;
@@ -342,6 +342,36 @@ nanomsg_send_recv_flag(struct nanomsg_ctx *ctx, ErlNifEnv *env, ERL_NIF_TERM ter
     return 1;
 }
 
+static ERL_NIF_TERM
+nanomsg_send_recv_dirty_finalizer(ErlNifEnv *env, ERL_NIF_TERM result) {
+    struct nanomsg_ctx *ctx = enif_priv_data(env);
+    if(enif_compare(ctx->atom_badarg, result) == 0)
+        return enif_make_badarg(env);
+    return result;
+}
+
+static ERL_NIF_TERM
+nanomsg_send_dirty(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    ERL_NIF_TERM result, term_socket = argv[0], term_buf = argv[1], term_flags = argv[2];
+    struct nanomsg_ctx *ctx = enif_priv_data(env);
+    int socket, flags = 0, writelen;
+    ErlNifBinary buf;
+
+    // All arguments are already validated on nanomsg_send
+    assert(enif_get_int(env, term_socket, &socket));
+    assert(enif_inspect_binary(env, term_buf, &buf));
+    assert(nanomsg_send_recv_flag(ctx, env, term_flags, &flags));
+
+    if((writelen = nn_send(socket, buf.data, buf.size, flags)) < 0) {
+        result = make_error_errno(ctx, env);
+        goto done;
+    }
+    result = make_ok(ctx, env, enif_make_int(env, writelen));
+
+done:
+    return enif_schedule_dirty_nif_finalizer(env, result,
+        nanomsg_send_recv_dirty_finalizer);
+}
 
 static ERL_NIF_TERM
 nanomsg_send(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
@@ -362,28 +392,23 @@ nanomsg_send(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     if(!nanomsg_send_recv_flag(ctx, env, term_flags, &flags))
         return enif_make_badarg(env);
 
-    if((writelen = nn_send(socket, buf.data, buf.size, flags)) < 0)
-        return make_error_errno(ctx, env);
+    // Non-blocking I/O, do not use dirty schedular
+    if(flags & NN_DONTWAIT) {
+        if((writelen = nn_send(socket, buf.data, buf.size, flags)) < 0)
+            return make_error_errno(ctx, env);
 
-    return make_ok(ctx, env, enif_make_int(env, writelen));
+        return make_ok(ctx, env, enif_make_int(env, writelen));
+    }
+
+    // Blocking I/O, use dirty schedular
+    return enif_schedule_dirty_nif(env, ERL_NIF_DIRTY_JOB_IO_BOUND, &nanomsg_send_dirty, argc, argv);
 }
 
 static ERL_NIF_TERM
-nanomsg_recv(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
-    if(argc != 2)
-        return enif_make_badarg(env);
-
-    ERL_NIF_TERM term_socket = argv[0], term_flags = argv[1];
-    struct nanomsg_ctx *ctx = enif_priv_data(env);
-    int socket, flags = 0, readlen;
+nanomsg_recv_internal(struct nanomsg_ctx *ctx, ErlNifEnv *env, int socket, int flags) {
+    int readlen;
     char *buf = NULL;
     ErlNifBinary bin;
-
-    if(!enif_get_int(env, term_socket, &socket))
-        return enif_make_badarg(env);
-
-    if(!nanomsg_send_recv_flag(ctx, env, term_flags, &flags))
-        return enif_make_badarg(env);
 
     if((readlen = nn_recv(socket, &buf, NN_MSG, flags)) < 0)
         return make_error_errno(ctx, env);
@@ -401,6 +426,49 @@ nanomsg_recv(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     return make_ok(ctx, env, enif_make_binary(env, &bin));
 }
 
+static ERL_NIF_TERM
+nanomsg_recv_dirty(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    ERL_NIF_TERM term_socket, term_flags;
+    struct nanomsg_ctx *ctx = enif_priv_data(env);
+    int socket = 0, flags = 0;
+
+    term_socket = argv[0];
+    term_flags = argv[1];
+
+    // All messages are already validated on nanomsg_recv
+    assert(enif_get_int(env, term_socket, &socket));
+    assert(nanomsg_send_recv_flag(ctx, env, term_flags, &flags));
+
+    return enif_schedule_dirty_nif_finalizer(env,
+        nanomsg_recv_internal(ctx, env, socket, flags),
+        &nanomsg_send_recv_dirty_finalizer);
+}
+
+static ERL_NIF_TERM
+nanomsg_recv(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
+    int socket  = 0, flags = 0;
+    ERL_NIF_TERM term_socket, term_flags;
+    struct nanomsg_ctx *ctx = enif_priv_data(env);
+
+    if(argc != 2)
+        return enif_make_badarg(env);
+
+    term_socket = argv[0];
+    term_flags = argv[1];
+    if(!enif_get_int(env, term_socket, &socket))
+        return enif_make_badarg(env);
+
+    if(!nanomsg_send_recv_flag(ctx, env, term_flags, &flags))
+        return enif_make_badarg(env);
+
+    // Non-blocking I/O, do not use dirty schedular
+    if(flags & NN_DONTWAIT)
+        return nanomsg_recv_internal(ctx, env, socket, flags);
+
+    // Blocking I/O, use dirty schedular
+    return enif_schedule_dirty_nif(env, ERL_NIF_DIRTY_JOB_IO_BOUND, &nanomsg_recv_dirty, argc, argv);
+}
+
 #define ATOM_INIT(ENV, VAL, ATOM) do { (VAL) = make_atom(ENV, ATOM); } while(0)
 
 static int
@@ -412,7 +480,7 @@ nanomsg_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)
 
     ATOM_INIT(env, ctx->atom_ok, "ok");
     ATOM_INIT(env, ctx->atom_error, "error");
-    ATOM_INIT(env, ctx->atom_none, "none");
+    ATOM_INIT(env, ctx->atom_badarg, "badarg");
 
     ATOM_INIT(env, ctx->atom_SOL_SOCKET, "sol_socket");
     ATOM_INIT(env, ctx->atom_TCP, "tcp");
