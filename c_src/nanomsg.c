@@ -31,6 +31,7 @@
 #include <string.h>
 
 #include <nanomsg/nn.h>
+
 #include <nanomsg/pubsub.h>
 #include <nanomsg/reqrep.h>
 #include <nanomsg/pipeline.h>
@@ -118,6 +119,7 @@ make_error(struct nanomsg_ctx* ctx, ErlNifEnv* env, const char* error)
     return enif_make_tuple2(env, ctx->atom_error, make_atom(env, error));
 }
 
+//#include <stdio.h>
 static ERL_NIF_TERM
 make_error_errno(struct nanomsg_ctx* ctx, ErlNifEnv* env)
 {
@@ -156,7 +158,7 @@ nanomsg_socket(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[])
     socket = nn_socket(AF_SP, protocol);
     if(socket < 0)
         make_error(ctx, env, "nn_socket_failed");
-    
+
     return make_ok(ctx, env, enif_make_int(env, socket));
 }
 
@@ -189,19 +191,19 @@ nanomsg_get_level(struct nanomsg_ctx *ctx, ERL_NIF_TERM term_level, int *level) 
         TEST_SET_BREAK(term_level, *level, INPROC);
         TEST_SET_BREAK(term_level, *level, IPC);
 
-        /* socket-type-specific, not implemented yet
-        TEST_SET_BREAK(term_level, level, SUB);
-        TEST_SET_BREAK(term_level, level, REQ);
-        TEST_SET_BREAK(term_level, level, SURVEYOR);
-        */
-
+        // socket-type-specific
+        TEST_SET_BREAK(term_level, *level, SUB);
+        TEST_SET_BREAK(term_level, *level, REQ);
+        TEST_SET_BREAK(term_level, *level, SURVEYOR);
         return 0;
     } while(0);
     return 1;
 }
 
+#define OPT_TYPE_INT 0
+#define OPT_TYPE_STRING 1
 static int
-nanomsg_get_sockopt(struct nanomsg_ctx *ctx, ERL_NIF_TERM term_opt, int *opt) {
+nanomsg_get_sockopt(struct nanomsg_ctx *ctx, ERL_NIF_TERM term_opt, int *opt, int *type) {
     do {
         TEST_SET_BREAK(term_opt, *opt, LINGER);
         TEST_SET_BREAK(term_opt, *opt, SNDBUF);
@@ -214,15 +216,22 @@ nanomsg_get_sockopt(struct nanomsg_ctx *ctx, ERL_NIF_TERM term_opt, int *opt) {
         TEST_SET_BREAK(term_opt, *opt, RCVPRIO);
         TEST_SET_BREAK(term_opt, *opt, IPV4ONLY);
 
-        /* string opts, not implemented yet
-        TEST_SET_BREAK(term_opt, *opt, SUB_SUBSCRIBE);
-        TEST_SET_BREAK(term_opt, *opt, SUB_UNSUBSCRIBE);
         TEST_SET_BREAK(term_opt, *opt, REQ_RESEND_IVL);
         TEST_SET_BREAK(term_opt, *opt, SURVEYOR_DEADLINE);
-        */
 
-        return 0;
+        // string opts
+        do {
+            TEST_SET_BREAK(term_opt, *opt, SUB_SUBSCRIBE);
+            TEST_SET_BREAK(term_opt, *opt, SUB_UNSUBSCRIBE);
+
+            return 0;
+        } while(0);
+
+        *type = OPT_TYPE_STRING;
+        return 1;
     } while(0);
+
+    *type = OPT_TYPE_INT;
     return 1;
 }
 
@@ -236,7 +245,8 @@ nanomsg_setsockopt(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     ERL_NIF_TERM term_opt = argv[2];
     ERL_NIF_TERM term_value = argv[3];
     struct nanomsg_ctx *ctx = enif_priv_data(env);
-    int socket, level, opt, value;
+    int socket, level, opt, type, int_value;
+    ErlNifBinary bin_value;
 
     if(!enif_get_int(env, term_socket, &socket))
         return enif_make_badarg(env);
@@ -244,21 +254,35 @@ nanomsg_setsockopt(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
     if(!nanomsg_get_level(ctx, term_level, &level))
         return enif_make_badarg(env);
 
-    if(!nanomsg_get_sockopt(ctx, term_opt, &opt))
+    if(!nanomsg_get_sockopt(ctx, term_opt, &opt, &type))
         return enif_make_badarg(env);
 
-    if(!enif_get_int(env, term_value, &value))
-        return enif_make_badarg(env);
+    if(type == OPT_TYPE_INT) {
+        if(!enif_get_int(env, term_value, &int_value))
+            return enif_make_badarg(env);
 
-    if(nn_setsockopt(socket, level, opt, &value, sizeof(int)))
-        return make_error_errno(ctx, env);
+        if(nn_setsockopt(socket, level, opt, &int_value, sizeof(int)))
+            return make_error_errno(ctx, env);
 
-    return ctx->atom_ok;
+        return ctx->atom_ok;
+    } else if(type == OPT_TYPE_STRING) {
+        if(!enif_inspect_binary(env, term_value, &bin_value))
+            return enif_make_badarg(env);
+
+        if(nn_setsockopt(socket, level, opt, bin_value.data, bin_value.size))
+            return make_error_errno(ctx, env);
+
+        return ctx->atom_ok;
+    }
+    printf("4\n");
+
+    // Should not reach here
+    return enif_make_badarg(env);
 }
 
 static ERL_NIF_TERM
 nanomsg_getsockopt(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
-    if(argc != 4)
+    if(argc != 3)
         return enif_make_badarg(env);
 
     struct nanomsg_ctx *ctx = enif_priv_data(env);
@@ -526,15 +550,15 @@ nanomsg_load(ErlNifEnv *env, void **priv_data, ERL_NIF_TERM load_info)
 }
 
 static ErlNifFunc nanomsg_exports[] = {
-	{"nanomsg_socket", 1, nanomsg_socket},
-	{"nanomsg_close", 1, nanomsg_close},
-	{"nanomsg_setsockopt", 4, nanomsg_setsockopt},
-	{"nanomsg_getsockopt", 3, nanomsg_getsockopt},
-	{"nanomsg_bind", 2, nanomsg_bind},
-	{"nanomsg_connect", 2, nanomsg_connect},
-	{"nanomsg_shutdown", 2, nanomsg_shutdown},
-	{"nanomsg_send", 3, nanomsg_send},
-	{"nanomsg_recv", 2, nanomsg_recv},
+	{"socket", 1, nanomsg_socket},
+	{"close", 1, nanomsg_close},
+	{"setsockopt", 4, nanomsg_setsockopt},
+	{"getsockopt", 3, nanomsg_getsockopt},
+	{"bind", 2, nanomsg_bind},
+	{"connect", 2, nanomsg_connect},
+	{"shutdown", 2, nanomsg_shutdown},
+	{"send", 3, nanomsg_send},
+	{"recv", 2, nanomsg_recv},
 };
 
 ERL_NIF_INIT(nanomsg_nif, nanomsg_exports, nanomsg_load, NULL, NULL, NULL)

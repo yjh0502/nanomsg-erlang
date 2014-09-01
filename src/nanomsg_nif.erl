@@ -20,57 +20,29 @@ init() ->
 not_loaded(Line) ->
     erlang:nif_error({not_loaded, [{module, ?MODULE}, {line, Line}]}).
 
-socket(Protocol) ->
-    nanomsg_socket(Protocol).
-
-close(Socket) ->
-    nanomsg_close(Socket).
-
-setsockopt(Socket, Level, Opt, Value) ->
-    nanomsg_setsockopt(Socket, Level, Opt, Value).
-
-getsockopt(Socket, Level, Opt) ->
-    nanomsg_getsockopt(Socket, Level, Opt).
-
-bind(Socket, Addr) ->
-    nanomsg_bind(Socket, Addr).
-
-connect(Socket, Addr) ->
-    nanomsg_connect(Socket, Addr).
-
-shutdown(Socket, Eid) ->
-    nanomsg_shutdown(Socket, Eid).
-
-send(Socket, Bin, Flags) ->
-    nanomsg_send(Socket, Bin, Flags).
-
-recv(Socket, Flags) ->
-    nanomsg_recv(Socket, Flags).
-
-
-nanomsg_socket(_Protocol) ->
+socket(_Protocol) ->
     ?NOT_LOADED.
 
-nanomsg_close(_Socket) ->
+close(_Socket) ->
     ?NOT_LOADED.
 
-nanomsg_setsockopt(_Socket, _Level, _Opt, _Value) ->
+setsockopt(_Socket, _Level, _Opt, _Value) ->
     ?NOT_LOADED.
 
-nanomsg_getsockopt(_Socket, _Level, _Opt) ->
+getsockopt(_Socket, _Level, _Opt) ->
     ?NOT_LOADED.
 
-nanomsg_bind(_Socket, _Addr) ->
+bind(_Socket, _Addr) ->
     ?NOT_LOADED.
 
-nanomsg_connect(_Socket, _Addr) ->
+connect(_Socket, _Addr) ->
     ?NOT_LOADED.
 
-nanomsg_shutdown(_Socket, _Eid) ->
+shutdown(_Socket, _Eid) ->
     ?NOT_LOADED.
 
-nanomsg_send(_Socket, _Binary, _Flags) ->
+send(_Socket, _Binary, _Flags) ->
     ?NOT_LOADED.
 
-nanomsg_recv(_Socket, _Flags) ->
+recv(_Socket, _Flags) ->
     ?NOT_LOADED.
