@@ -27,7 +27,6 @@ Todos
  * controlling process, active/pasive mode like `gen_tcp`
  * manager processed to keep track of sockets/endpoints
  * send/recv with timeouts, seperated process with `nn_poll`
- * readable atom error codes instead of cryptic numbers from `nn_errno()`
 
 Bugs
 -----

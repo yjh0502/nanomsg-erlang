@@ -10,8 +10,7 @@
 -type socket() :: non_neg_integer().
 -type endpoint() :: non_neg_integer().
 
--type err() :: {error, errcode() | atom()}.
--type errcode() :: integer().
+-type err() :: {error, atom()}.
 
 -type send_recv_opts() :: [send_recv_opt()].
 -type send_recv_opt() :: dontwait.

@@ -119,12 +119,54 @@ make_error(struct nanomsg_ctx* ctx, ErlNifEnv* env, const char* error)
     return enif_make_tuple2(env, ctx->atom_error, make_atom(env, error));
 }
 
+#define ERR_CASE_RETURN(X) case X: return #X
+static const char *
+errno_to_string(int err) {
+    // Error codes from nn.h
+    switch(err) {
+        ERR_CASE_RETURN(ENOTSUP);
+        ERR_CASE_RETURN(EPROTONOSUPPORT);
+        ERR_CASE_RETURN(ENOBUFS);
+        ERR_CASE_RETURN(ENETDOWN);
+        ERR_CASE_RETURN(EADDRINUSE);
+        ERR_CASE_RETURN(EADDRNOTAVAIL);
+        ERR_CASE_RETURN(ECONNREFUSED);
+        ERR_CASE_RETURN(EINPROGRESS);
+        ERR_CASE_RETURN(ENOTSOCK);
+        ERR_CASE_RETURN(EAFNOSUPPORT);
+        ERR_CASE_RETURN(EPROTO);
+        ERR_CASE_RETURN(EAGAIN);
+        ERR_CASE_RETURN(EBADF);
+        ERR_CASE_RETURN(EINVAL);
+        ERR_CASE_RETURN(EMFILE);
+        ERR_CASE_RETURN(EFAULT);
+        ERR_CASE_RETURN(EACCESS);
+        ERR_CASE_RETURN(ENETRESET);
+        ERR_CASE_RETURN(ENETUNREACH);
+        ERR_CASE_RETURN(EHOSTUNREACH);
+        ERR_CASE_RETURN(ENOTCONN);
+        ERR_CASE_RETURN(EMSGSIZE);
+        ERR_CASE_RETURN(ETIMEDOUT);
+        ERR_CASE_RETURN(ECONNABORTED);
+        ERR_CASE_RETURN(ECONNRESET);
+        ERR_CASE_RETURN(ENOPROTOOPT);
+        ERR_CASE_RETURN(EISCONN);
+        ERR_CASE_RETURN(ESOCKTNOSUPPORT);
+        ERR_CASE_RETURN(ETERM);
+        ERR_CASE_RETURN(EFSM);
+    }
+
+    return "EUNKNOWN";
+}
+
 //#include <stdio.h>
 static ERL_NIF_TERM
 make_error_errno(struct nanomsg_ctx* ctx, ErlNifEnv* env)
 {
-    //printf("nanomsg error: %d(%s)\n", nn_errno(), nn_strerror(nn_errno()));
-    return enif_make_tuple2(env, ctx->atom_error, enif_make_int(env, nn_errno()));
+    int err = nn_errno();
+    const char *errstr = errno_to_string(err);
+    ERL_NIF_TERM err_atom = make_atom(env, errstr);
+    return enif_make_tuple2(env, ctx->atom_error, err_atom);
 }
 
 #define TEST_SET_BREAK(TERM, VAL, NAME) \
@@ -274,7 +316,6 @@ nanomsg_setsockopt(ErlNifEnv *env, int argc, const ERL_NIF_TERM argv[]) {
 
         return ctx->atom_ok;
     }
-    printf("4\n");
 
     // Should not reach here
     return enif_make_badarg(env);
